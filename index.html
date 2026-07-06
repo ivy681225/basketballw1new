@@ -68,6 +68,17 @@
       font-size: 15px;
       font-family: inherit;
     }
+    
+    .selector-flex {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .selector-flex .form-group {
+      margin-bottom: 0;
+      width: 100%;
+    }
+    
     .radio-group {
       display: flex;
       gap: 20px;
@@ -180,9 +191,24 @@
 
 <div class="container">
   <div class="card form-card session-selector-zone">
-    <div class="form-group" style="margin-bottom: 0;">
-      <label for="sessionSelect" style="color: #ea580c; font-size: 15px;">🔍 切換球聚歷史紀錄 / 預約期數：</label>
-      <select id="sessionSelect" style="border-color: #ea580c; font-weight: bold; color: #ea580c;"></select>
+    <div class="selector-flex">
+      <div class="form-group">
+        <label for="quarterSelect" style="color: #ea580c; font-size: 15px;">🔍 1. 先選擇球聚季度：</label>
+        <select id="quarterSelect" style="border-color: #ea580c; font-weight: bold; color: #ea580c;">
+          <option value="current">⭐ 當期熱門球聚登記</option>
+          <option value="y2026q3">📅 2026 第三季 (7-9月)</option>
+          <option value="y2026q4">📅 2026 第四季 (10-12月)</option>
+          <option value="y2027q1">📅 2027 第一季 (1-3月)</option>
+          <option value="y2027q2">📅 2027 第二季 (4-6月)</option>
+          <option value="y2027q3">📅 2027 第三季 (7-9月)</option>
+          <option value="y2027q4">📅 2027 第四季 (10-12月)</option>
+          <option value="history">📜 歷史球聚紀錄查詢</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="sessionSelect" style="color: #ea580c; font-size: 15px;">📅 2. 再選擇球聚日期：</label>
+        <select id="sessionSelect" style="border-color: #ea580c; font-weight: bold; color: #0f172a;"></select>
+      </div>
     </div>
   </div>
 
@@ -237,7 +263,6 @@
 </div>
 
 <script>
-// 🌟 完美同步：已精準置換成妳 image_7.png 中的專案真實金鑰
 const firebaseConfig = {
   apiKey: "AIzaSyBs3GvdIOS3PDAadKjdFlPjnPdRS3quK3Y",
   authDomain: "basketballw1new.firebaseapp.com",
@@ -254,13 +279,23 @@ const database = firebase.database();
 const ADMIN_PASSWORD = "dan1225"; 
 let isAdminMode = false;
 
-const HOLIDAYS = [];
+const HOLIDAYS = [
+  "2026-09-28", "2026-10-26",
+  "2027-02-08", "2027-03-01", "2027-04-05", "2027-10-11", "2027-10-25"
+];
 
 let currentSelectedDateStr = "";
 let sessionOptionsData = {};
 let dbRef = null;
 let rawCachedData = {};
 
+let structuredQuarterData = {
+  current: [], history: [],
+  y2026q3: [], y2026q4: [],
+  y2027q1: [], y2027q2: [], y2027q3: [], y2027q4: []
+};
+
+const quarterSelect = document.getElementById("quarterSelect");
 const sessionSelect = document.getElementById("sessionSelect");
 const deadlineMessage = document.getElementById("deadlineMessage");
 const submitBtn = document.getElementById("submitBtn");
@@ -296,11 +331,7 @@ function findDefaultMondayStr(now, availableDates) {
   const currentDay = currentMonday.getDay();
   const daysUntilMonday = (1 - currentDay + 7) % 7;
   currentMonday.setDate(currentMonday.getDate() + daysUntilMonday);
-  
-  if (currentDay === 1 && now.getHours() >= 20) { 
-    currentMonday.setDate(currentMonday.getDate() + 7); 
-  }
-  
+  if (currentDay === 1 && now.getHours() >= 20) { currentMonday.setDate(currentMonday.getDate() + 7); }
   let targetStr = formatDateToYYYYMMDD(currentMonday);
   if (availableDates.includes(targetStr)) return targetStr;
   if (targetStr < availableDates[0]) return availableDates[0];
@@ -310,18 +341,22 @@ function findDefaultMondayStr(now, availableDates) {
 
 function initSelectorOptions() {
   const now = new Date();
-  const startDate = new Date("2026-07-06"); 
-  const endDate = new Date("2026-09-22");   
-  
   let availableDates = [];
-  let loopMonday = new Date(startDate);
-  
-  while (loopMonday <= endDate) {
-    let loopStr = formatDateToYYYYMMDD(loopMonday);
-    if (!HOLIDAYS.includes(loopStr)) {
-      availableDates.push(loopStr);
-    }
-    loopMonday.setDate(loopMonday.getDate() + 7); 
+
+  let loop2026 = new Date("2026-07-06");
+  const end2026 = new Date("2026-12-31");
+  while (loop2026 <= end2026) {
+    let dateStr = formatDateToYYYYMMDD(loop2026);
+    if (!HOLIDAYS.includes(dateStr)) { availableDates.push(dateStr); }
+    loop2026.setDate(loop2026.getDate() + 7);
+  }
+
+  let loop2027 = new Date("2027-01-01");
+  const end2027 = new Date("2027-12-31");
+  while (loop2027 <= end2027) {
+    let dateStr = formatDateToYYYYMMDD(loop2027);
+    if (!HOLIDAYS.includes(dateStr)) { availableDates.push(dateStr); }
+    loop2027.setDate(loop2027.getDate() + 7);
   }
   
   availableDates.sort();
@@ -330,29 +365,64 @@ function initSelectorOptions() {
   availableDates.forEach(dateStr => {
     const mondayObj = new Date(dateStr);
     const sessionDetails = calculateSessionDetailsForDate(mondayObj);
-    
-    let label = `📅 球聚日期：${dateStr} (週一)`;
-    if (dateStr === currentSelectedDateStr) {
-      label += "【⭐ 當期球聚】";
-    } else if (dateStr < currentSelectedDateStr) {
-      label += "【歷史紀錄】";
-    } else {
-      label += "【未來預約】";
-    }
+    const year = mondayObj.getFullYear();
+    const month = mondayObj.getMonth() + 1;
     
     sessionOptionsData[dateStr] = sessionDetails;
     
+    let item = { value: dateStr, text: `📆 球聚日期：${dateStr} (週一)` };
+    
+    if (dateStr === currentSelectedDateStr) {
+      let currentItem = { value: dateStr, text: item.text + "【⭐ 當期球聚】" };
+      structuredQuarterData.current.push(currentItem);
+    }
+    
+    if (dateStr < currentSelectedDateStr) {
+      structuredQuarterData.history.push(item);
+    } else {
+      if (year === 2026) {
+        if (month >= 7 && month <= 9) structuredQuarterData.y2026q3.push(item);
+        else if (month >= 10 && month <= 12) structuredQuarterData.y2026q4.push(item);
+      } else if (year === 2027) {
+        if (month >= 1 && month <= 3) structuredQuarterData.y2027q1.push(item);
+        else if (month >= 4 && month <= 6) structuredQuarterData.y2027q2.push(item);
+        else if (month >= 7 && month <= 9) structuredQuarterData.y2027q3.push(item);
+        else if (month >= 10 && month <= 12) structuredQuarterData.y2027q4.push(item);
+      }
+    }
+  });
+  
+  renderDateOptions("current");
+}
+
+function renderDateOptions(targetQuarter) {
+  sessionSelect.innerHTML = "";
+  let list = structuredQuarterData[targetQuarter] || [];
+  
+  if (list.length === 0) {
     const opt = document.createElement("option");
-    opt.value = dateStr;
-    opt.innerText = label;
-    if (dateStr === currentSelectedDateStr) opt.selected = true;
+    opt.innerText = "本季暫無安排場次或皆為歷史紀錄";
+    opt.disabled = true;
+    sessionSelect.appendChild(opt);
+    return;
+  }
+  
+  list.forEach(item => {
+    const opt = document.createElement("option");
+    opt.value = item.value;
+    opt.innerText = item.text;
+    if (item.value === currentSelectedDateStr) { opt.selected = true; }
     sessionSelect.appendChild(opt);
   });
   
-  switchFirebaseNode(currentSelectedDateStr);
+  switchFirebaseNode(sessionSelect.value);
 }
 
+quarterSelect.addEventListener("change", (e) => { renderDateOptions(e.target.value); });
+sessionSelect.addEventListener("change", (e) => { if (e.target.value) { switchFirebaseNode(e.target.value); } });
+
 function switchFirebaseNode(dateStr) {
+  if (!dateStr) return;
   if (dbRef) dbRef.off();
   currentSelectedDateStr = dateStr;
   dbRef = database.ref(`sessions_monday/${dateStr}`);
@@ -362,10 +432,6 @@ function switchFirebaseNode(dateStr) {
   });
   updateSystemStatus();
 }
-
-sessionSelect.addEventListener("change", (e) => {
-  switchFirebaseNode(e.target.value);
-});
 
 function updateSystemStatus() {
   const now = new Date();
@@ -407,25 +473,88 @@ function renderList(data) {
   
   let seasonAttendCount = 0; let casualPlayers = []; let leavePlayers = [];
   
-  players.forEach(p => { if (p.status === "請假") { leavePlayers.push(p); } else if (p.status === "出賽") { if (p.identity === "季租") { seasonAttendCount++; } else { casualPlayers.push(p); } } });
-  let availableSlots = Math.max(0, 20 - seasonAttendCount); let finalAttendCount = 0; let finalWaitCount = 0;
+  players.forEach(p => { 
+    if (p.status === "請假") { leavePlayers.push(p); } 
+    else if (p.status === "出賽") { 
+      if (p.identity === "季租") { seasonAttendCount++; } 
+      else { casualPlayers.push(p); } 
+    } 
+  });
   
+  let availableSlots = Math.max(0, 20 - seasonAttendCount); 
+  let finalAttendCount = 0; 
+  let finalWaitCount = 0;
+  
+  let finalAttendSeasonListHTML = [];
+  let finalAttendCasualListHTML = [];
+
   players.forEach(player => {
     if (player.status === "請假") return;
-    const timeStr = formatFullTimestamp(player.timestamp); const li = document.createElement("li"); const metaDiv = document.createElement("div"); metaDiv.className = "player-meta"; const nameSpan = document.createElement("span"); nameSpan.innerHTML = `<b>${player.name}</b>`; metaDiv.appendChild(nameSpan);
-    let labelText = ""; let idClass = ""; let targetContainer = attendList; 
     
-    if (player.identity === "季租") { idClass = "bg-blue"; labelText = "季租"; finalAttendCount++; } else { let idx = casualPlayers.findIndex(c => c.name === player.name); if (isClosed) { if (idx !== -1 && idx < availableSlots) { idClass = "bg-green"; labelText = `散打(遞補 ${idx + 1})`; finalAttendCount++; } else { idClass = "bg-orange"; labelText = `散打(候 ${idx - availableSlots + 1})`; targetContainer = waitList; finalWaitCount++; } } else { idClass = "bg-orange"; labelText = `散打(候 ${idx + 1})`; targetContainer = waitList; finalWaitCount++; } }
+    const timeStr = formatFullTimestamp(player.timestamp); 
+    const li = document.createElement("li"); 
+    const metaDiv = document.createElement("div"); 
+    metaDiv.className = "player-meta"; 
+    const nameSpan = document.createElement("span"); 
+    nameSpan.innerHTML = `<b>${player.name}</b>`; 
+    metaDiv.appendChild(nameSpan);
     
-    const tagSpan = document.createElement("span"); tagSpan.className = `identity-tag ${idClass}`; tagSpan.innerText = labelText; metaDiv.appendChild(tagSpan); li.appendChild(metaDiv); const timeDiv = document.createElement("div"); timeDiv.className = "time-tag"; timeDiv.innerText = `⏱️ ${timeStr}`; li.appendChild(timeDiv);
-    if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { if(confirm(`確認刪除 ${player.name}？`)) database.ref(`sessions_monday/${currentSelectedDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } targetContainer.appendChild(li);
+    let labelText = ""; let idClass = ""; let isWaitZone = false;
+    
+    if (player.identity === "季租") { 
+      idClass = "bg-blue"; labelText = "季租"; finalAttendCount++; 
+    } else { 
+      let idx = casualPlayers.findIndex(c => c.name === player.name); 
+      if (isClosed) { 
+        if (idx !== -1 && idx < availableSlots) { 
+          idClass = "bg-green"; labelText = `散打(遞補 ${idx + 1})`; finalAttendCount++; 
+        } else { 
+          idClass = "bg-orange"; labelText = `散打(候 ${idx - availableSlots + 1})`; isWaitZone = true; finalWaitCount++; 
+        } 
+      } else { 
+        idClass = "bg-orange"; labelText = `散打(候 ${idx + 1})`; isWaitZone = true; finalWaitCount++; 
+      } 
+    }
+    
+    const tagSpan = document.createElement("span"); 
+    tagSpan.className = `identity-tag ${idClass}`; 
+    tagSpan.innerText = labelText; 
+    metaDiv.appendChild(tagSpan); 
+    li.appendChild(metaDiv); 
+    
+    const timeDiv = document.createElement("div"); 
+    timeDiv.className = "time-tag"; 
+    timeDiv.innerText = `⏱️ ${timeStr}`; 
+    li.appendChild(timeDiv);
+    
+    if (isAdminMode) { 
+      const delBtn = document.createElement("button"); 
+      delBtn.innerText = "❌ 刪除"; 
+      delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; 
+      delBtn.addEventListener("click", () => { 
+        if(confirm(`確認刪除 ${player.name}？`)) database.ref(`sessions_monday/${currentSelectedDateStr}/${player.name}`).remove(); 
+      }); 
+      li.appendChild(delBtn); 
+    } 
+    
+    if (isWaitZone) { waitList.appendChild(li); } 
+    else {
+      if (player.identity === "季租") { finalAttendSeasonListHTML.push(li); } 
+      else { finalAttendCasualListHTML.push(li); }
+    }
   });
+  
+  finalAttendSeasonListHTML.forEach(el => attendList.appendChild(el));
+  finalAttendCasualListHTML.forEach(el => attendList.appendChild(el));
   
   leavePlayers.forEach(player => {
     const timeStr = formatFullTimestamp(player.timestamp); const li = document.createElement("li"); const metaDiv = document.createElement("div"); metaDiv.className = "player-meta"; const nameSpan = document.createElement("span"); nameSpan.innerHTML = `<b>${player.name}</b>`; metaDiv.appendChild(nameSpan); const idClass = player.identity === "季租" ? "bg-blue" : "bg-green"; const tagSpan = document.createElement("span"); tagSpan.className = `identity-tag ${idClass}`; tagSpan.innerText = player.identity === "季租" ? "季租(假)" : "散打(假)"; metaDiv.appendChild(tagSpan); li.appendChild(metaDiv); const timeDiv = document.createElement("div"); timeDiv.className = "time-tag"; timeDiv.innerText = `⏱️ ${timeStr}`; li.appendChild(timeDiv);
     if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { database.ref(`sessions_monday/${currentSelectedDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } leaveList.appendChild(li);
   });
-  document.getElementById("attendCount").innerText = finalAttendCount; document.getElementById("waitCount").innerText = finalWaitCount; document.getElementById("leaveCount").innerText = leavePlayers.length;
+  
+  document.getElementById("attendCount").innerText = finalAttendCount; 
+  document.getElementById("waitCount").innerText = finalWaitCount; 
+  document.getElementById("leaveCount").innerText = leavePlayers.length;
 }
 
 submitBtn.addEventListener("click", () => {
